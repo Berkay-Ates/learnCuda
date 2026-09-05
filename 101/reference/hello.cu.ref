@@ -1,0 +1,49 @@
+// 101/01 — Hello World
+//
+// Goal: understand the thread hierarchy. A kernel launch <<<gridDim, blockDim>>>
+// spins up (gridDim * blockDim) threads. Each thread runs the SAME code but
+// can find its own identity via threadIdx / blockIdx / blockDim / gridDim.
+//
+//   grid  = a collection of blocks
+//   block = a collection of threads (all threads in a block can share
+//           __shared__ memory and sync with __syncthreads())
+//   thread = one lane of execution
+//
+// Build:  make
+// Run:    ./hello
+
+#include <cstdio>
+#include "../../common/cuda_check.cuh"
+
+__global__ void hello_kernel() {
+    // Each thread computes its own global (flattened) index.
+    int global_id = blockIdx.x * blockDim.x + threadIdx.x;
+
+    printf("Hello from block %d, thread %d (global id %d)\n",
+           blockIdx.x, threadIdx.x, global_id);
+}
+
+int main() {
+    const int num_blocks = 2;
+    const int threads_per_block = 4;
+
+    std::printf("Launching %d blocks x %d threads = %d total threads\n\n",
+                num_blocks, threads_per_block, num_blocks * threads_per_block);
+
+    hello_kernel<<<num_blocks, threads_per_block>>>();
+
+    // Kernel launches are asynchronous — the CPU keeps going immediately.
+    // Always check for launch errors, then sync so device printf actually
+    // flushes before the program exits.
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    std::printf("\nNotice the print order is NOT sequential — threads run\n");
+    std::printf("concurrently and there's no guaranteed ordering between blocks.\n");
+    std::printf("Run it a few times; the order will shuffle.\n\n");
+
+    std::printf("Exercise: change num_blocks/threads_per_block to launch 1000\n");
+    std::printf("threads total using a 2D block/grid instead of 1D.\n");
+
+    return 0;
+}

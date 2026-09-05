@@ -1,0 +1,91 @@
+// 101/02 — Vector Addition
+//
+// The canonical first real CUDA program. Demonstrates the full round trip:
+//   1. Allocate memory on host (CPU) and device (GPU)
+//   2. Copy input data host -> device
+//   3. Launch a kernel to do the work in parallel
+//   4. Copy the result device -> host
+//   5. Verify against a CPU reference
+//   6. Free everything
+//
+// Build:  make
+// Run:    ./vector_add
+
+#include <cstdio>
+#include <cmath>
+#include <vector>
+#include "../../common/cuda_check.cuh"
+
+__global__ void vector_add_kernel(const float* a, const float* b, float* c, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Guard against out-of-bounds threads: n is rarely an exact multiple of
+    // blockDim.x, so the last block will have some idle/out-of-range lanes.
+    if (i < n) {
+        c[i] = a[i] + b[i];
+    }
+}
+
+int main() {
+    const int n = 1 << 20; // ~1M elements
+    const size_t bytes = n * sizeof(float);
+
+    // --- Host memory ---
+    std::vector<float> h_a(n), h_b(n), h_c(n);
+    for (int i = 0; i < n; ++i) {
+        h_a[i] = static_cast<float>(i);
+        h_b[i] = static_cast<float>(2 * i);
+    }
+
+    // --- Device memory ---
+    float *d_a = nullptr, *d_b = nullptr, *d_c = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_a, bytes));
+    CUDA_CHECK(cudaMalloc(&d_b, bytes));
+    CUDA_CHECK(cudaMalloc(&d_c, bytes));
+
+    // --- Host -> Device ---
+    CUDA_CHECK(cudaMemcpy(d_a, h_a.data(), bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_b, h_b.data(), bytes, cudaMemcpyHostToDevice));
+
+    // --- Launch configuration ---
+    // Pick a block size (a multiple of the 32-wide warp; 256 is a common
+    // default), then compute enough blocks to cover all n elements,
+    // rounding up.
+    const int threads_per_block = 256;
+    const int num_blocks = (n + threads_per_block - 1) / threads_per_block;
+
+    vector_add_kernel<<<num_blocks, threads_per_block>>>(d_a, d_b, d_c, n);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    // --- Device -> Host ---
+    CUDA_CHECK(cudaMemcpy(h_c.data(), d_c, bytes, cudaMemcpyDeviceToHost));
+
+    // --- Verify against CPU reference ---
+    bool ok = true;
+    for (int i = 0; i < n; ++i) {
+        float expected = h_a[i] + h_b[i];
+        if (std::fabs(h_c[i] - expected) > 1e-5f) {
+            std::printf("Mismatch at %d: got %f, expected %f\n", i, h_c[i], expected);
+            ok = false;
+            break;
+        }
+    }
+    std::printf(ok ? "Result verified correct. c[0..4] = %f %f %f %f %f\n"
+                    : "FAILED\n",
+                h_c[0], h_c[1], h_c[2], h_c[3], h_c[4]);
+
+    // --- Cleanup ---
+    CUDA_CHECK(cudaFree(d_a));
+    CUDA_CHECK(cudaFree(d_b));
+    CUDA_CHECK(cudaFree(d_c));
+
+    std::printf("\nExercises:\n");
+    std::printf("  1. Change threads_per_block to 32, 128, 1024 and see if it still works.\n");
+    std::printf("  2. Add timing (cudaEventRecord/cudaEventElapsedTime) around the kernel\n");
+    std::printf("     launch and around the memcpy calls. Which one dominates?\n");
+    std::printf("  3. Try n that is NOT a power of two, e.g. 1000003, to stress the\n");
+    std::printf("     boundary-check branch.\n");
+
+    return 0;
+}
