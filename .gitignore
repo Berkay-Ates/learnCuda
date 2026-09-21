@@ -1,0 +1,22 @@
+# Whitelist approach: ignore everything by default, then explicitly
+# un-ignore known source/asset file types. Compiled binaries produced by
+# the per-example Makefiles have no extension (name == Makefile's TARGET),
+# so this keeps them out of git without having to list every binary name.
+*
+!*/
+
+!.gitignore
+!Makefile*
+!*.cu
+!*.cuh
+!*.h
+!*.hpp
+!*.cpp
+!*.py
+!*.md
+!*.json
+!*.ref
+!*.png
+!*.jpg
+!*.jpeg
+!*.raw
